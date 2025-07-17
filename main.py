@@ -1,6 +1,7 @@
 import os
 import subprocess
 import requests
+import uvicorn                     
 from fastapi import FastAPI, Request, status
 from dotenv import load_dotenv
 from fastapi.responses import PlainTextResponse
@@ -50,3 +51,10 @@ async def github_webhook(req: Request):
     except Exception as e:
         notify_telegram(f"❌ Unexpected error:\n{str(e)}")
         return PlainTextResponse("Server error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ------------------------------------------------------------------
+# Run the server when executed directly:  python3 main.py
+# ------------------------------------------------------------------
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
