@@ -41,6 +41,7 @@ async def github_webhook(req: Request):
         subprocess.run(["git", "reset", "--hard", f"origin/{GIT_BRANCH}"], cwd=GIT_REPO_PATH, check=True)
 
         notify_telegram(f"✅ GitHub repo updated: `{GIT_REPO_SLUG}`")
+        print("updated")
         return PlainTextResponse("Update successful", status_code=status.HTTP_200_OK)
 
     except subprocess.CalledProcessError as e:
