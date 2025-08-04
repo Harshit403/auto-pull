@@ -11,7 +11,7 @@ load_dotenv()
 
 # Settings
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
-GIT_BRANCH = os.getenv("GIT_BRANCH", "main")
+GIT_BRANCH = os.getenv("GIT_BRANCH")
 GIT_USERNAME = os.getenv("GIT_USERNAME")
 GIT_PAT = os.getenv("GIT_PAT")
 GIT_REPO_SLUG = os.getenv("GIT_REPO_SLUG")
