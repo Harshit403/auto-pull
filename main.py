@@ -1,20 +1,17 @@
 import os
-import subprocess
 import requests
-import uvicorn
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 from fastapi.responses import PlainTextResponse
 from datetime import datetime
 
 load_dotenv()
 
-# Settings
 GIT_REPO_PATH = os.getenv("GIT_REPO_PATH")
-GIT_BRANCH = os.getenv("GIT_BRANCH")
-GIT_USERNAME = os.getenv("GIT_USERNAME")
-GIT_PAT = os.getenv("GIT_PAT")
-GIT_REPO_SLUG = os.getenv("GIT_REPO_SLUG")
+GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
+GITHUB_PAT = os.getenv("GITHUB_PAT")
+GITHUB_REPO_SLUG = os.getenv("GITHUB_REPO_SLUG")
+GIT_BRANCH = os.getenv("GIT_BRANCH", "main")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -23,61 +20,44 @@ LOG_FILE_PATH = os.path.join(os.getcwd(), "git_logs.txt")
 app = FastAPI()
 
 def notify_telegram(message: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         requests.post(url, data=data, timeout=10)
-    except Exception as e:
-        print(f"Telegram error: {e}")
+    except Exception:
+        pass
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
         os.chdir(GIT_REPO_PATH)
 
-        # Log start
         with open(LOG_FILE_PATH, "a") as log_file:
-            log_file.write(f"\n\n---- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ----\n")
+            log_file.write(f"\n\n---- {timestamp} ----\n")
             log_file.write("Starting git pull...\n")
 
-            # Optionally set origin URL if credentials provided
-            if GIT_USERNAME and GIT_PAT and GIT_REPO_SLUG:
-                remote_url = f"https://{GIT_USERNAME}:{GIT_PAT}@github.com/{GIT_REPO_SLUG}.git"
-                subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
+        if GITHUB_USERNAME and GITHUB_PAT and GITHUB_REPO_SLUG:
+            remote_url = f"https://{GITHUB_USERNAME}:{GITHUB_PAT}@github.com/{GITHUB_REPO_SLUG}.git"
+            os.system(f'git remote set-url origin {remote_url}')
 
-            # Start pull process
-            process = subprocess.Popen(
-                ["git", "pull", "origin", GIT_BRANCH],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
+        pull_output = os.popen(f'git pull origin {GIT_BRANCH}').read()
 
-            while True:
-                output = process.stdout.readline().decode("utf-8")
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    log_file.write(output.strip() + "\n")
-
-            err_output = process.stderr.read().decode("utf-8")
-            if err_output:
-                log_file.write(f"Error: {err_output}\n")
-
+        with open(LOG_FILE_PATH, "a") as log_file:
+            log_file.write(f"Pull Output:\n{pull_output}\n")
             log_file.write("Git pull completed.\n")
 
-        notify_telegram(f"✅ Git pull successful: `{GIT_REPO_SLUG or 'Local repo'}`")
+        notify_telegram(f"✅ Git pull successful on `{GIT_BRANCH}` for `{GITHUB_REPO_SLUG or 'repo'}`")
         return PlainTextResponse("Git pull completed", status_code=200)
 
     except Exception as e:
         with open(LOG_FILE_PATH, "a") as log_file:
-            log_file.write(f"Error: {str(e)}\n")
-        notify_telegram(f"❌ Git pull failed:\n{str(e)}")
+            log_file.write(f"[{timestamp}] Error: {str(e)}\n")
+        notify_telegram(f"❌ Git pull failed on `{GIT_BRANCH}`:\n{str(e)}")
         return PlainTextResponse("Error occurred", status_code=500)
 
 @app.get("/")
 async def root():
     return {"message": "Webhook is running"}
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
