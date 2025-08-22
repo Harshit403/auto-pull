@@ -1,6 +1,4 @@
 import os
-import hmac
-import hashlib
 import logging
 import requests
 from fastapi import FastAPI, Request, HTTPException, status
@@ -14,23 +12,16 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GITHUB_SECRET = os.getenv('GIT_PAT')
 REPO_PATH = os.getenv('GIT_REPO_PATH')
 BRANCH = os.getenv('GIT_BRANCH', 'master')
 PORT = int(os.getenv('PORT', 8000))
 GIT_USERNAME = os.getenv('GIT_USERNAME')
 GIT_REPO_SLUG = os.getenv('GIT_REPO_SLUG')
+GIT_PAT = os.getenv('GIT_PAT')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_IDS = os.getenv('TELEGRAM_CHAT_ID', '').split(',')
 
 app = FastAPI()
-
-def verify_signature(payload_body: bytes, signature_header: str) -> bool:
-    if not signature_header:
-        return False
-    hash_object = hmac.new(GITHUB_SECRET.encode('utf-8'), msg=payload_body, digestmod=hashlib.sha256)
-    expected_signature = "sha256=" + hash_object.hexdigest()
-    return hmac.compare_digest(expected_signature, signature_header)
 
 def send_telegram_message(message: str):
     for chat_id in TELEGRAM_CHAT_IDS:
@@ -45,7 +36,7 @@ def send_telegram_message(message: str):
 def update_repository():
     try:
         repo = Repo(REPO_PATH)
-        remote_url = f"https://{GIT_USERNAME}:{GITHUB_SECRET}@github.com/{GIT_REPO_SLUG}.git"
+        remote_url = f"https://{GIT_USERNAME}:{GIT_PAT}@github.com/{GIT_REPO_SLUG}.git"
         origin = repo.remotes.origin
         origin.set_url(remote_url)
         origin.fetch()
@@ -67,20 +58,18 @@ def update_repository():
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
-    signature = request.headers.get('X-Hub-Signature-256')
-    payload_body = await request.body()
-    
-    if not verify_signature(payload_body, signature):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
-    
     event_type = request.headers.get('X-GitHub-Event')
     if event_type != 'push':
         return JSONResponse(content={'message': 'Only push events are processed'}, status_code=200)
     
     payload = await request.json()
     ref = payload.get('ref', '')
+    logger.info(f"Received push to ref: {ref}")
+    
     if ref != f'refs/heads/{BRANCH}':
-        return JSONResponse(content={'message': f'Push to {ref} ignored, only {BRANCH} is processed'}, status_code=200)
+        message = f'Push to {ref} ignored, only {BRANCH} is processed'
+        logger.info(message)
+        return JSONResponse(content={'message': message}, status_code=200)
     
     success, message, commit_hash = update_repository()
     
@@ -94,6 +83,7 @@ async def github_webhook(request: Request):
             send_telegram_message(telegram_msg)
     
     status_code = 200 if success else 500
+    logger.info(f"Webhook processing result: {message}")
     return JSONResponse(content={'message': message}, status_code=status_code)
 
 @app.get("/")
